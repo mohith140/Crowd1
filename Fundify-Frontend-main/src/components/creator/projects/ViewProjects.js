@@ -23,7 +23,7 @@ function ViewProjects({ data, setData }) {
     try {
       // API call to delete the project from the database
       console.log(""+projectId)
-      await axios.delete(SERVER_URL+`/api/projects/delete/${projectId}`); // Adjust the URL to your actual endpoint
+      await axios.delete(SERVER_URL+`/api/campaigns/${projectId}`); // Updated to match the backend route
       console.log("kl1")
       // If successful, update the local state to remove the project from the UI
       const updatedData = [...data];

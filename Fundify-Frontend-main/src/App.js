@@ -20,6 +20,7 @@ import Home from "./components/Home";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import ProjectDetails from "./components/audience/creators/ProjectDetails";
+import ViewCreator from "./components/audience/creators/ViewCreator";
 
 const theme = createTheme({
   palette: {
@@ -53,8 +54,14 @@ function App() {
         <Route path="/home/creators">
           <Home />
         </Route>
+        <Route path="/campaign/:campaignId">
+          <ProjectDetails />
+        </Route>
         <Route path="/project-details/:projectId">
           <ProjectDetails />
+        </Route>
+        <Route path="/viewcreator/:pageName">
+          <ViewCreator />
         </Route>
         <Route path="/" exact>
           <Redirect to="/home/creators" />

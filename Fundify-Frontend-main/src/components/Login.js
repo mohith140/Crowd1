@@ -15,7 +15,6 @@ import Container from "@mui/material/Container";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import CloseIcon from "@mui/icons-material/Close";
 import IconButton from "@mui/material/IconButton";
-import { useHistory } from "react-router-dom";
 import { SERVER_URL } from "../constant/serverUrl";
 import Radio from "@mui/material/Radio";
 import RadioGroup from "@mui/material/RadioGroup";
@@ -27,6 +26,7 @@ import Alert from '@mui/material/Alert';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardActions from '@mui/material/CardActions';
+import { CircularProgress } from '@mui/material';
 
 function Copyright(props) {
   return (
@@ -45,48 +45,55 @@ function Copyright(props) {
 const theme = createTheme();
 
 export default function LoginAudience() {
-  let history = useHistory();
-  const [errorMessage, setErrorMessage] = React.useState("");
-  const [open, setOpen] = React.useState(false);
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [userType, setUserType] = React.useState('audience');
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
 
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    // eslint-disable-next-line no-console
-    console.log({
-      email: data.get("email"),
-      password: data.get("password"),
-      userType: data.get("userType"),
-    });
-
-    axios
-      .post(SERVER_URL + "/users/login", {
-        email: data.get("email"),
-        password: data.get("password"),
-        userType: data.get("userType"),
-      })
-      .then((response) => {
-        if (response.status == 200) {
-          localStorage.setItem("email", response.data.email);
-          localStorage.setItem("userType", response.data.userType);
-          localStorage.setItem("pageName", response.data.pageName);
-          localStorage.setItem("firstName", response.data.firstName);
-          if (response.data.userType === "creator") {
-            history.replace("/creatordashboard/projects");
-          } else {
-            history.replace("/audiencedashboard/creators");
-          }
-        } else {
-          setOpen(true);
-        }
-      })
-      .catch((err) => {
-        setErrorMessage("Invalid Credentials");
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    
+    try {
+      console.log('Attempting login with:', { email, userType });
+      const response = await axios.post('http://localhost:5001/api/auth/login', {
+        email,
+        password,
+        userType
       });
-  };
-
-  const handleClose = () => {
-    setOpen(false);
+      
+      const { token, user } = response.data;
+      
+      // Store authentication data
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('email', user.email);
+      localStorage.setItem('userType', user.userType);
+      localStorage.setItem('firstName', user.firstName);
+      localStorage.setItem('lastName', user.lastName);
+      
+      console.log('Login successful:', user);
+      
+      // Determine redirect path based on user type
+      const redirectPath = user.userType === 'creator' 
+        ? '/creatordashboard'
+        : '/audiencedashboard';
+      
+      console.log(`Redirecting to ${redirectPath}`);
+      
+      // Use standard browser navigation for consistent behavior
+      window.location.href = redirectPath;
+    } catch (err) {
+      console.error('Login error:', err);
+      setError(
+        err.response?.data?.message || 
+        'Login failed. Please check your credentials and try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -119,9 +126,9 @@ export default function LoginAudience() {
               <Avatar sx={{ m: 1, bgcolor: "secondary.main" }}>
                 <LockOutlinedIcon />
               </Avatar>
-              {errorMessage && (
+              {error && (
                   <Typography color="error" sx={{ mt: 2 }} >
-                    {errorMessage}
+                    {error}
                   </Typography>
                 )}
               <Typography component="h1" variant="h5">
@@ -142,6 +149,8 @@ export default function LoginAudience() {
                       label="Email Address"
                       name="email"
                       autoComplete="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12}>
@@ -153,6 +162,8 @@ export default function LoginAudience() {
                       type="password"
                       id="password"
                       autoComplete="new-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
                     />
                   </Grid>
                 </Grid>
@@ -167,7 +178,8 @@ export default function LoginAudience() {
                     row
                     aria-label="user"
                     name="userType"
-                    defaultValue="creator"
+                    value={userType}
+                    onChange={(e) => setUserType(e.target.value)}
                   >
                     <FormControlLabel
                       value="creator"
@@ -192,9 +204,11 @@ export default function LoginAudience() {
                     background: "linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%)",
                     color: "white",
                   }}
+                  disabled={loading}
                 >
-                  Login
+                  {loading ? <CircularProgress size={24} /> : 'Login'}
                 </Button>
+
                 <Grid
                   container
                   justifyContent="flex-end"
@@ -206,7 +220,7 @@ export default function LoginAudience() {
                       <Link
                         href="#"
                         onClick={() => {
-                          history.push("/signupcreator");
+                          window.location.href = "/signupcreator";
                         }}
                         style={{ color: "black" }}
                         underline="hover"
@@ -217,7 +231,7 @@ export default function LoginAudience() {
                       <Link
                         href="#"
                         onClick={() => {
-                          history.push("/signupaudience");
+                          window.location.href = "/signupaudience";
                         }}
                         style={{ color: "black" }}
                         underline="hover"
@@ -231,16 +245,6 @@ export default function LoginAudience() {
               </Box>
             </Box>
           </CardContent>
-          <CardActions>
-            <Snackbar
-              open={open}
-              autoHideDuration={3000}
-              onClose={handleClose}
-              message="Invalid Credentials"
-            >
-              <Alert >Invalid Credentials</Alert>
-            </Snackbar>
-          </CardActions>
         </Card>
         <Copyright sx={{ mt: 5 }} />
       </Container>
@@ -248,234 +252,3 @@ export default function LoginAudience() {
 
   );
 }
-
-
-// import * as React from "react";
-// import axios from "axios";
-// import Avatar from "@mui/material/Avatar";
-// import Button from "@mui/material/Button";
-// import CssBaseline from "@mui/material/CssBaseline";
-// import TextField from "@mui/material/TextField";
-// import FormControlLabel from "@mui/material/FormControlLabel";
-// import Checkbox from "@mui/material/Checkbox";
-// import Link from "@mui/material/Link";
-// import Grid from "@mui/material/Grid";
-// import Box from "@mui/material/Box";
-// import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
-// import Typography from "@mui/material/Typography";
-// import Container from "@mui/material/Container";
-// import { createTheme, ThemeProvider } from "@mui/material/styles";
-// import CloseIcon from "@mui/icons-material/Close";
-// import IconButton from "@mui/material/IconButton";
-// import { useHistory } from "react-router-dom";
-// import { SERVER_URL } from "../constant/serverUrl";
-// import Radio from "@mui/material/Radio";
-// import RadioGroup from "@mui/material/RadioGroup";
-// import FormControl from "@mui/material/FormControl";
-// import FormLabel from "@mui/material/FormLabel";
-// import { blueGrey } from "@mui/material/colors";
-// import Snackbar from '@mui/material/Snackbar';
-// import Alert from '@mui/material/Alert';
-
-
-// function Copyright(props) {
-//   return (
-//     <Typography
-//       variant="body2"
-//       color="text.secondary"
-//       align="center"
-//       {...props}
-//     >
-//       Fundify © {new Date().getFullYear()}
-//     </Typography>
-//   );
-// }
-
-// const theme = createTheme();
-
-// export default function LoginAudience() {
-//   let history = useHistory();
-//   const [open, setOpen] = React.useState(false);
-
-//   const handleSubmit = (event) => {
-//     event.preventDefault();
-//     const data = new FormData(event.currentTarget);
-//     // eslint-disable-next-line no-console
-//     console.log({
-//       email: data.get("email"),
-//       password: data.get("password"),
-//       userType: data.get("userType"),
-//     });
-
-//       axios
-//         .post(SERVER_URL + "/users/login", {
-//           email: data.get("email"),
-//           password: data.get("password"),
-//           userType: data.get("userType"),
-//         })
-//         .then((response) => {
-//           if (response.status == 200) {
-//             localStorage.setItem("email", response.data.email);
-//             localStorage.setItem("userType", response.data.userType);
-//             localStorage.setItem("pageName", response.data.pageName);
-//             localStorage.setItem("firstName", response.data.firstName);
-//             if (response.data.userType === "creator") {
-//               history.replace("/creatordashboard/projects");
-//             } else {
-//               history.replace("/audiencedashboard/creators");
-//             }
-//           } else {
-//             setOpen(true);
-     
-//           }
-//         });
-    
-//   };
-
-//   const handleClose = () => {
-//     setOpen(false);
-//   };
-
-//   return (
-//     <ThemeProvider theme={theme}>
-//       <Container>
-//         <Grid container justifyContent="flex-end">
-//           <Grid item>
-//             <IconButton
-//               aria-label="close"
-//               onClick={() => {
-//                 history.replace("/home/creators");
-//               }}
-//             >
-//               <CloseIcon />
-//             </IconButton>
-//           </Grid>
-//         </Grid>
-//         <Container component="main" maxWidth="xs">
-//           <CssBaseline />
-//           <Box
-//             sx={{
-//               marginTop: 8,
-//               display: "flex",
-//               flexDirection: "column",
-//               alignItems: "center",
-//             }}
-//           >
-//             <Avatar sx={{ m: 1, bgcolor: "secondary.main" }}>
-//               <LockOutlinedIcon />
-//             </Avatar>
-//             <Typography component="h1" variant="h5">
-//               Login
-//             </Typography>
-//             <Box
-//               component="form"
-//               noValidate
-//               onSubmit={handleSubmit}
-//               sx={{ mt: 3 }}
-//             >
-//               <Grid container spacing={2}>
-//                 <Grid item xs={12}>
-//                   <TextField
-//                     required
-//                     fullWidth
-//                     id="email"
-//                     label="Email Address"
-//                     name="email"
-//                     autoComplete="email"
-//                   />
-//                 </Grid>
-//                 <Grid item xs={12}>
-//                   <TextField
-//                     required
-//                     fullWidth
-//                     name="password"
-//                     label="Password"
-//                     type="password"
-//                     id="password"
-//                     autoComplete="new-password"
-//                   />
-//                 </Grid>
-//               </Grid>
-//               <FormControl
-//                 component="fieldset"
-//                 style={{
-//                   marginTop: ".75rem",
-//                   marginBottom: ".25rem",
-//                 }}
-//               >
-//                 <RadioGroup
-//                   row
-//                   aria-label="user"
-//                   name="userType"
-//                   defaultValue="creator"
-//                 >
-//                   <FormControlLabel
-//                     value="creator"
-//                     control={<Radio />}
-//                     label="Creator"
-//                   />
-//                   <FormControlLabel
-//                     value="audience"
-//                     control={<Radio />}
-//                     label="Audience"
-//                   />
-//                 </RadioGroup>
-//               </FormControl>
-//               <Button
-//                 type="submit"
-//                 fullWidth
-//                 variant="contained"
-//                 sx={{ mt: 1, mb: 2 }}
-//                 style={{ backgroundColor: "black" }}
-//               >
-//                 Login
-//               </Button>
-//               <Grid
-//                 container
-//                 justifyContent="flex-end"
-//                 style={{ marginBottom: ".25rem" }}
-//               >
-//                 <Grid item>
-//                   <small>
-//                     Create new account as{" "}
-//                     <Link
-//                       href="#"
-//                       onClick={() => {
-//                         history.push("/signupcreator");
-//                       }}
-//                       style={{ color: "black" }}
-//                       underline="hover"
-//                     >
-//                       creator
-//                     </Link>{" "}
-//                     or{" "}
-//                     <Link
-//                       href="#"
-//                       onClick={() => {
-//                         history.push("/signupaudience");
-//                       }}
-//                       style={{ color: "black" }}
-//                       underline="hover"
-//                     >
-//                       audience
-//                     </Link>
-//                   </small>
-//                 </Grid>
-//               </Grid>
-//             </Box>
-//           </Box>
-//           <Snackbar
-//         open={open}
-//         autoHideDuration={3000}
-//         onClose={handleClose}
-//         message="Invalid Credentials"
-//        // action={action}
-//       >
-//                <Alert severity="error">Invalid Credentials</Alert>
-//         </Snackbar>
-//           <Copyright sx={{ mt: 5 }} />
-//         </Container>
-//       </Container>
-//     </ThemeProvider>
-//   );
-// }

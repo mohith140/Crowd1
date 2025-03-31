@@ -41,7 +41,7 @@ export default function SignUpAudience() {
     const data = new FormData(event.currentTarget);
 
     axios
-      .post(SERVER_URL + "/users/new", {
+      .post(SERVER_URL + "/api/auth/register/audience", {
         userType: "audience",
         firstName: data.get("firstName"),
         lastName: data.get("lastName"),

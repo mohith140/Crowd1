@@ -1,969 +1,796 @@
 import React, { useState, useRef, useEffect } from "react";
 import axios from "axios";
-import Grid from "@mui/material/Grid";
-import Card from "@mui/material/Card";
-import CardActions from "@mui/material/CardActions";
-import CardContent from "@mui/material/CardContent";
-import CardMedia from "@mui/material/CardMedia";
-import Typography from "@mui/material/Typography";
-import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
-import Snackbar from "@mui/material/Snackbar";
-import Alert from "@mui/material/Alert";
+import {
+  Box,
+  Typography,
+  Grid,
+  Card,
+  CardContent,
+  CardMedia,
+  CardActions,
+  Button,
+  TextField,
+  Snackbar,
+  Alert,
+  Menu,
+  MenuItem,
+  Container,
+  Divider,
+  LinearProgress,
+  Chip,
+  Paper,
+  InputAdornment,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  FormControl,
+  InputLabel,
+  Select,
+  Skeleton,
+  FormGroup,
+  FormControlLabel,
+  Switch,
+  CircularProgress,
+  CardActionArea
+} from "@mui/material";
+import FilterListIcon from "@mui/icons-material/FilterList";
+import SearchIcon from "@mui/icons-material/Search";
+import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
+import PersonIcon from "@mui/icons-material/Person";
+import MonetizationOnIcon from "@mui/icons-material/MonetizationOn";
+import SortIcon from "@mui/icons-material/Sort";
+import AccountCircleIcon from "@mui/icons-material/AccountCircle";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import AttachMoneyIcon from "@mui/icons-material/AttachMoney";
+import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import { SERVER_URL } from "../../../constant/serverUrl";
 import { useHistory } from "react-router-dom";
-import Menu from "@mui/material/Menu";
-import MenuItem from "@mui/material/MenuItem";
+import { formatImageUrl } from "../../../services/api";
+
+// Helper function to calculate the percentage of funds raised
+const calculateProgress = (raised, target) => {
+  if (!target || target <= 0) return 0;
+  const percentage = (raised / target) * 100;
+  return Math.min(parseFloat(percentage.toFixed(2)), 100); // Cap at 100% and round to 2 decimal places
+};
+
+// Format date helper
+const formatDate = (dateString) => {
+  if (!dateString) return "No deadline";
+  
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+};
+
+// Get timeAgo function
+const getTimeAgo = (timestamp) => {
+  if (!timestamp) return "";
+  
+  const now = new Date();
+  const then = new Date(timestamp);
+  const seconds = Math.floor((now - then) / 1000);
+  
+  if (seconds < 60) return "just now";
+  
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
+  
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} ${months === 1 ? 'month' : 'months'} ago`;
+  
+  const years = Math.floor(months / 12);
+  return `${years} ${years === 1 ? 'year' : 'years'} ago`;
+};
+
+// Get raised amount from audience
+const getRaisedAmount = (audiences) => {
+  if (!audiences || !Array.isArray(audiences)) return 0;
+  
+  return audiences.reduce((total, audience) => {
+    return total + (parseInt(audience.amount) || 0);
+  }, 0);
+};
+
+// Get backers count
+const getBackersCount = (audiences) => {
+  if (!audiences || !Array.isArray(audiences)) return 0;
+  
+  const uniqueBackers = new Set();
+  audiences.forEach(audience => {
+    if (audience.email) uniqueBackers.add(audience.email);
+  });
+  
+  return uniqueBackers.size;
+};
+
+// Get time left
+const getTimeLeft = (targetDate) => {
+  if (!targetDate) return "No deadline";
+  
+  const now = new Date();
+  const target = new Date(targetDate);
+  const diffTime = target - now;
+  
+  if (diffTime <= 0) return "No days left"; // Changed from "Ended" to "No days left"
+  
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  if (diffDays === 1) return "1 day left";
+  if (diffDays < 30) return `${diffDays} days left`;
+  
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths === 1) return "1 month left";
+  return `${diffMonths} months left`;
+};
 
 function Projects() {
   const history = useHistory();
   const [projects, setProjects] = useState([]);
   const [filteredProjects, setFilteredProjects] = useState([]);
-  const amountRefs = useRef([]);
-  const [amount, setAmount] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
-  const [openSnackbar1, setOpenSnackbar1] = useState(false);
-  const [snackbarMessage1, setSnackbarMessage1] = useState("");
-  const [Raised, setRaised] = useState("");
+  const [snackbarSeverity, setSnackbarSeverity] = useState("success");
+  const [pledgeDialogOpen, setPledgeDialogOpen] = useState(false);
+  const [currentProject, setCurrentProject] = useState(null);
+  const [pledgeAmount, setPledgeAmount] = useState("");
   
-  // Category Filter States
-  const [anchorEl, setAnchorEl] = useState(null);
-  const [selectedCategory, setSelectedCategory] = useState("");
+  // Filter states
+  const [categoryAnchorEl, setCategoryAnchorEl] = useState(null);
+  const [sortAnchorEl, setSortAnchorEl] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [sortMethod, setSortMethod] = useState("newest");
+  const [showActiveOnly, setShowActiveOnly] = useState(true);
+  const [categories, setCategories] = useState([]);
   
   useEffect(() => {
-    axios
-      .get(SERVER_URL + "/projects")
-      .then((response) => {
-        setProjects([...response.data].reverse());
-        setFilteredProjects([...response.data].reverse()); // Initially show all projects
-      })
-      .catch((err) => console.log(err));
+    fetchProjects();
   }, []);
+
+  const fetchProjects = async () => {
+    setLoading(true);
+    try {
+      // Get active campaigns from the API
+      const response = await axios.get(`${SERVER_URL}/api/public/campaigns`);
+      
+      // Set projects and filtered projects
+      setProjects(response.data.campaigns || []);
+      setFilteredProjects(response.data.campaigns || []);
+      
+      // Extract unique categories
+      const uniqueCategories = [...new Set(response.data.campaigns.map(project => project.category))];
+      setCategories(uniqueCategories);
+    } catch (error) {
+      console.error("Error fetching projects:", error);
+      showAlert("Error loading campaigns", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSearch = (event) => {
     const term = event.target.value.toLowerCase();
     setSearchTerm(term);
+    
+    applyFilters(term, selectedCategory, sortMethod);
+  };
 
-    // Filter projects by title
-    const filtered = projects.filter((project) =>
-      project.title.toLowerCase().includes(term)
-    );
+  const handleCategoryMenuOpen = (event) => {
+    setCategoryAnchorEl(event.currentTarget);
+  };
+
+  const handleCategoryMenuClose = () => {
+    setCategoryAnchorEl(null);
+  };
+
+  const handleSortMenuOpen = (event) => {
+    setSortAnchorEl(event.currentTarget);
+  };
+
+  const handleSortMenuClose = () => {
+    setSortAnchorEl(null);
+  };
+
+  const handleCategorySelect = (category) => {
+    setSelectedCategory(category);
+    handleCategoryMenuClose();
+    
+    applyFilters(searchTerm, category, sortMethod);
+  };
+
+  const handleSortSelect = (sortBy) => {
+    setSortMethod(sortBy);
+    handleSortMenuClose();
+    
+    applyFilters(searchTerm, selectedCategory, sortBy);
+  };
+
+  const applyFilters = (search, category, sort) => {
+    let filtered = [...projects];
+    
+    // Apply search filter
+    if (search) {
+      filtered = filtered.filter(project => 
+        project.title.toLowerCase().includes(search) ||
+        project.description.toLowerCase().includes(search) ||
+        project.pageName.toLowerCase().includes(search)
+      );
+    }
+    
+    // Apply category filter
+    if (category !== "All") {
+      filtered = filtered.filter(project => 
+        project.category && project.category.toLowerCase() === category.toLowerCase()
+      );
+    }
+    
+    // Apply active only filter
+    if (showActiveOnly) {
+      filtered = filtered.filter(project => project.status === "active");
+    }
+    
+    // Apply sorting
+    switch (sort) {
+      case "newest":
+        filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        break;
+      case "oldest":
+        filtered.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        break;
+      case "mostFunded":
+        filtered.sort((a, b) => getRaisedAmount(b.audience) - getRaisedAmount(a.audience));
+        break;
+      case "endingSoon":
+        filtered.sort((a, b) => {
+          if (!a.targetDate) return 1;
+          if (!b.targetDate) return -1;
+          return new Date(a.targetDate) - new Date(b.targetDate);
+        });
+        break;
+      default:
+        break;
+    }
+    
     setFilteredProjects(filtered);
   };
 
-  const handleCategoryFilter = (category) => {
-    setSelectedCategory(category);
-    setAnchorEl(null);
-
-    // Filter projects by category
-    if (category === "Education" || category === "Technology" || category === "Donation") {
-      const filtered = projects.filter((project) =>
-      
-        project.category &&  project.category.toLowerCase() === category.toLowerCase()
-      
-      );
-      setFilteredProjects(filtered);
-    } else {
-      setFilteredProjects(projects); // Reset to all projects if no category selected
-    }
+  const handleOpenPledgeDialog = (project) => {
+    setCurrentProject(project);
+    setPledgeDialogOpen(true);
   };
 
-  const handlePledge = (pageName, projectTitle, idx) => {
-    const pledgeAmount = parseInt(amountRefs.current[idx].value) || 0;
-    if (pledgeAmount === 0) return;
+  const handlePledgeDialogClose = () => {
+    setPledgeDialogOpen(false);
+    setCurrentProject(null);
+    setPledgeAmount("");
+  };
 
-    // Find the specific project to update
-    const updatedProjects = [...projects];
-    const projectIndex = updatedProjects.findIndex((project) => project.title === projectTitle);
+  const handlePledgeSubmit = async () => {
+    if (!currentProject) return;
     
-    if (projectIndex !== -1) {
-      const updatedProject = updatedProjects[projectIndex];
-      
-      // Check if the pledge amount exceeds the required amount
-      if (pledgeAmount < 50) {
-        setSnackbarMessage("Amount of "+pledgeAmount+"not allowed!");
-        setOpenSnackbar(true);
-       
-        setSnackbarMessage1("please pledge with a minimum amount of 50");
-        setOpenSnackbar1(true);
-      
-       
-        return;
-      }
-
-     let x=updatedProject.audience.reduce((total, a) => total + (parseInt(a.amount) || 0), 0)
-      if (x+pledgeAmount > updatedProject.amount) {
-        setSnackbarMessage("Amount exceeds the required pledge amount!");
-        setOpenSnackbar(true);
-        return;
-      }
-
-      // Add the pledge to the audience list
-      updatedProject.audience.push({
-        timestamp: Date.now(),
-        firstName: localStorage.getItem("firstName"),
-        lastName: localStorage.getItem("lastName"),
-        amount: pledgeAmount,
-      });
-
-      // Update the raised amount for the project
-      updatedProject.raisedAmount = updatedProject.audience.reduce(
-        (total, a) => total + (parseInt(a.amount) || 0),
-        0
-      );
-
-      // Update the projects in the state
-      updatedProjects[projectIndex] = updatedProject;
-
-      // Now set the new state for both projects and filteredProjects
-      setProjects(updatedProjects);
-      setFilteredProjects(updatedProjects);
+    const amount = parseInt(pledgeAmount);
+    if (!amount || amount < 50) {
+      showAlert("Please pledge with a minimum amount of 50", "error");
+      return;
     }
-
-    // Send the pledge to the server
-    axios
-      .post(SERVER_URL + "/creator/project/pledge", {
-        timestamp: Date.now(),
-        projectTitle: projectTitle,
-        amount: pledgeAmount,
-        pageName: pageName,
-        audienceEmail: localStorage.getItem("email"),
-        firstName: localStorage.getItem("firstName"),
-        lastName: localStorage.getItem("lastName"),
-      })
-      .catch((err) => console.log(err));
+    
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        showAlert("Please login to back this project", "error");
+        return;
+      }
+      
+      // Get the project details
+      const projectId = currentProject.id;
+      
+      // Send the pledge to the server using the audience back-campaign endpoint
+      const response = await axios.post(
+        `${SERVER_URL}/api/audience/back-campaign`,
+        {
+          campaignId: projectId,
+          amount: amount
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      
+      // Close the dialog and show success message
+      handlePledgeDialogClose();
+      showAlert(`Thank you for pledging ₹${amount}!`, "success");
+      
+      // Refresh projects to update the data
+      fetchProjects();
+    } catch (error) {
+      console.error("Error pledging:", error);
+      showAlert(error.response?.data?.message || "Failed to process your pledge. Please try again.", "error");
+    }
+  };
+  
+  const handlePledgeAmountChange = (event) => {
+    setPledgeAmount(event.target.value);
   };
 
   const handleViewDetails = (projectId) => {
     history.push(`/project-details/${projectId}`);
   };
 
+  const showAlert = (message, severity = "success") => {
+    setSnackbarMessage(message);
+    setSnackbarSeverity(severity);
+    setOpenSnackbar(true);
+  };
+
+  const handleCloseSnackbar = () => {
+    setOpenSnackbar(false);
+  };
+
+  const getCategoryChipColor = (category) => {
+    const categoryColors = {
+      "Education": { bg: "#e3f2fd", color: "#1565c0" },
+      "Technology": { bg: "#e8f5e9", color: "#2e7d32" },
+      "Donation": { bg: "#f3e5f5", color: "#7b1fa2" },
+      "Healthcare": { bg: "#e8eaf6", color: "#3949ab" },
+      "Environment": { bg: "#e0f2f1", color: "#00796b" },
+      "Arts": { bg: "#fff3e0", color: "#e65100" },
+      "Community": { bg: "#fce4ec", color: "#c2185b" },
+      "Other": { bg: "#f5f5f5", color: "#616161" }
+    };
+    
+    return categoryColors[category] || { bg: "#f5f5f5", color: "#616161" };
+  };
+
+  // Categories for the filter menu
+  const categoryOptions = [
+    "All",
+    "Education",
+    "Technology",
+    "Donation",
+    "Healthcare",
+    "Environment",
+    "Arts",
+    "Community",
+    "Other"
+  ];
+
+  // Sort options
+  const sortOptions = [
+    { value: "newest", label: "Newest" },
+    { value: "oldest", label: "Oldest" },
+    { value: "mostFunded", label: "Most Funded" },
+    { value: "endingSoon", label: "Ending Soon" }
+  ];
+
+  const handleActiveToggle = (event) => {
+    setShowActiveOnly(event.target.checked);
+  };
+
+  // Card renderer based on the selected view
+  const renderProjectCards = () => {
+    return filteredProjects.map((project) => {
+      const progress = calculateProgress(project.raisedAmount, project.amount);
+      const daysLeft = getTimeLeft(project.targetDate);
+      const backerCount = project.backerCount || 0;
+      
+      return (
+        <Grid item xs={12} sm={6} md={4} key={project.id}>
+          <Card 
+            sx={{ 
+              height: '100%', 
+              display: 'flex', 
+              flexDirection: 'column',
+              transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
+              '&:hover': {
+                transform: 'translateY(-5px)',
+                boxShadow: '0 10px 20px rgba(0,0,0,0.1)'
+              },
+              borderRadius: '12px',
+              overflow: 'hidden'
+            }}
+          >
+            <CardMedia
+              component="img"
+              height="180"
+              image={formatImageUrl(project.imageUrl) || "https://via.placeholder.com/300x180?text=Project"}
+              alt={project.title}
+              sx={{ cursor: 'pointer' }}
+              onClick={() => handleViewDetails(project.id)}
+            />
+            
+            <CardContent sx={{ p: 2, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+              <Box sx={{ mb: 2 }}>
+                <Chip 
+                  size="small" 
+                  label={project.category || 'Donation'} 
+                  sx={{ mb: 1, bgcolor: 'rgba(0,0,0,0.05)' }} 
+                />
+                
+                <Typography 
+                  variant="h6" 
+                  component="h2" 
+                  sx={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    lineHeight: 1.3,
+                    height: '2.6em',
+                    mb: 1
+                  }}
+                >
+                  {project.title}
+                </Typography>
+                
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  {project.pageName}
+                </Typography>
+              </Box>
+              
+              <Typography 
+                variant="body2" 
+                color="text.secondary" 
+                sx={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  height: '3em',
+                  mb: 2
+                }}
+              >
+                {project.description}
+              </Typography>
+              
+              <Box sx={{ mt: 'auto' }}>
+                <Box sx={{ mb: 1 }}>
+                  <LinearProgress 
+                    variant="determinate" 
+                    value={progress} 
+                    sx={{ 
+                      height: 8, 
+                      borderRadius: 4,
+                      bgcolor: 'rgba(0,0,0,0.05)',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: progress >= 100 ? 'success.main' : 'primary.main'
+                      }
+                    }} 
+                  />
+                </Box>
+                
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2" fontWeight="medium">
+                    ₹{project.raisedAmount || 0}
+                    <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                      of ₹{project.amount}
+                    </Typography>
+                  </Typography>
+                  
+                  <Typography 
+                    variant="body2" 
+                    fontWeight="bold"
+                    color={progress >= 100 ? 'success.main' : 'primary.main'}
+                  >
+                    {progress.toFixed(2)}% Funded
+                  </Typography>
+                </Box>
+                
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    <PersonIcon fontSize="small" sx={{ verticalAlign: 'middle', mr: 0.5 }} />
+                    {backerCount} backers
+                  </Typography>
+                  
+                  {project.targetDate && (
+                    <Typography variant="body2" color="text.secondary">
+                      <AccessTimeIcon fontSize="small" sx={{ verticalAlign: 'middle', mr: 0.5 }} />
+                      {daysLeft}
+                    </Typography>
+                  )}
+                </Box>
+                
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    fullWidth
+                    onClick={() => handleOpenPledgeDialog(project)}
+                    disabled={false} // Always enabled to allow backing the project
+                  >
+                    BACK THIS PROJECT
+                  </Button>
+                  
+                  <Button
+                    variant="outlined"
+                    onClick={() => handleViewDetails(project.id)}
+                  >
+                    DETAILS
+                  </Button>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      );
+    });
+  };
+
+  if (loading) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
+          <CircularProgress />
+        </Box>
+      </Container>
+    );
+  }
+
   return (
-    <div>
-      {/* Filter and Search Box */}
-     
-      {/* Project Cards */}
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: "2rem", backgroundColor: "#f5f5f5", top: "20px", flexDirection: "column", alignItems: "center" }}>
-        
-        {/* Filter Button */}
-       
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      {/* Hero Section */}
+      <Box 
+        sx={{
+          py: 5,
+          textAlign: 'center',
+          borderRadius: '16px',
+          mb: 4,
+          background: 'linear-gradient(45deg, #3b82f6 0%, #93c5fd 100%)',
+          color: 'white',
+          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+        }}
+      >
+        <Typography variant="h3" component="h1" fontWeight="bold" gutterBottom>
+          Discover Active Campaigns
+        </Typography>
+        <Typography variant="h6" sx={{ mb: 3, maxWidth: '700px', mx: 'auto', opacity: 0.9 }}>
+          Support innovative projects and contribute to your favorite creators
+        </Typography>
+      </Box>
+      
+      {/* Filters and Search */}
+      <Paper 
+        elevation={2} 
+        sx={{ 
+          p: 3, 
+          mb: 4, 
+          borderRadius: '12px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 2
+        }}
+      >
         {/* Search Box */}
-        
         <TextField
           variant="outlined"
           size="small"
           value={searchTerm}
           onChange={handleSearch}
-          placeholder="Search by Project Title"
+          placeholder="Search campaigns"
           sx={{
-            borderRadius: "25px",
-            width: "50%",
-            backgroundColor: "#f5f5f5",
-            "& .MuiOutlinedInput-root": {
-              borderRadius: "25px",
-              borderColor: "green",
-            },
-            top: "23px",
-            borderColor: "green",
-            input: {
-              paddingLeft: "1rem",
-            },
+            flexGrow: 1,
+            minWidth: { xs: '100%', md: '200px' },
+            maxWidth: { md: '400px' },
+          }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon color="action" />
+              </InputAdornment>
+            ),
           }}
         />
-      </div>
-      <Button
-          aria-controls="category-menu"
-          aria-haspopup="true"
-          onClick={(event) => setAnchorEl(event.currentTarget)}
+        
+        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+          {/* Category Filter */}
+          <Button
+            variant="outlined"
+            startIcon={<FilterListIcon />}
+            onClick={handleCategoryMenuOpen}
+            color="primary"
+            size="medium"
+          >
+            {selectedCategory}
+          </Button>
+          
+          <Menu
+            anchorEl={categoryAnchorEl}
+            open={Boolean(categoryAnchorEl)}
+            onClose={handleCategoryMenuClose}
+          >
+            {categoryOptions.map((category) => (
+              <MenuItem
+                key={category}
+                onClick={() => handleCategorySelect(category)}
+                selected={category === selectedCategory}
+              >
+                {category}
+              </MenuItem>
+            ))}
+          </Menu>
+          
+          {/* Sort Options */}
+          <Button
+            variant="outlined"
+            startIcon={<SortIcon />}
+            onClick={handleSortMenuOpen}
+            color="primary"
+            size="medium"
+          >
+            Sort: {sortOptions.find(opt => opt.value === sortMethod)?.label}
+          </Button>
+          
+          <Menu
+            anchorEl={sortAnchorEl}
+            open={Boolean(sortAnchorEl)}
+            onClose={handleSortMenuClose}
+          >
+            {sortOptions.map((option) => (
+              <MenuItem
+                key={option.value}
+                onClick={() => handleSortSelect(option.value)}
+                selected={option.value === sortMethod}
+              >
+                {option.label}
+              </MenuItem>
+            ))}
+          </Menu>
+          
+          <FormGroup>
+            <FormControlLabel
+              control={
+                <Switch 
+                  checked={showActiveOnly} 
+                  onChange={handleActiveToggle} 
+                  color="primary" 
+                />
+              }
+              label="Show active campaigns only"
+            />
+          </FormGroup>
+        </Box>
+      </Paper>
+
+      {/* Project Cards */}
+      {loading ? (
+        // Loading skeletons
+        <Grid container spacing={3}>
+          {[1, 2, 3, 4, 5, 6].map((item) => (
+            <Grid item xs={12} sm={6} md={4} key={item}>
+              <Card sx={{ height: '100%', borderRadius: '12px' }}>
+                <Skeleton variant="rectangular" height={200} animation="wave" />
+                <CardContent>
+                  <Skeleton animation="wave" height={32} width="80%" sx={{ mb: 1 }} />
+                  <Skeleton animation="wave" height={20} width="40%" sx={{ mb: 2 }} />
+                  <Skeleton animation="wave" height={60} />
+                  <Box sx={{ mt: 2 }}>
+                    <Skeleton animation="wave" height={40} />
+                    <Skeleton animation="wave" height={30} width="60%" sx={{ mt: 1 }} />
+                  </Box>
+                </CardContent>
+                <CardActions>
+                  <Skeleton animation="wave" height={36} width={100} />
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Skeleton animation="wave" height={36} width={80} />
+                </CardActions>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      ) : filteredProjects.length === 0 ? (
+        // No projects found
+        <Paper
+          elevation={2}
           sx={{
-            backgroundColor: "#00e676",
-            color: "black",
-            fontWeight: "bold",
-            marginBottom: "10px",
-            marginLeft:"530px",
-            width: "200px",
+            p: 5,
+            textAlign: 'center',
+            borderRadius: '16px',
+            backgroundColor: '#f9fafb',
           }}
         >
-         Category
-        </Button>
-        
-        <Menu
-          id="category-menu"
-          anchorEl={anchorEl}
-          open={Boolean(anchorEl)}
-          onClose={() => setAnchorEl(null)}
-        >
-          <MenuItem onClick={() => handleCategoryFilter("Education")}>Education</MenuItem>
-          <MenuItem onClick={() => handleCategoryFilter("Technology")}>Technology</MenuItem>
-          <MenuItem onClick={() => handleCategoryFilter("Donation")}>Donation</MenuItem>
-          <MenuItem onClick={() => handleCategoryFilter("All")}>All</MenuItem>
-        </Menu>
+          <Typography variant="h6" color="textSecondary">
+            No campaigns found
+          </Typography>
+          <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+            Try adjusting your search or filters to find what you're looking for.
+          </Typography>
+        </Paper>
+      ) : (
+        // Project cards grid
+        <Grid container spacing={3}>
+          {renderProjectCards()}
+        </Grid>
+      )}
 
-     
-      <Grid container spacing={4} style={{ padding: "3rem", backgroundColor: "#f5f5f5" }}>
-        {filteredProjects.map((element, index) => (
-          <Grid item key={index} xs={12} sm={6} md={4} lg={4}>
-            <Card sx={{ width: 330, borderRadius: "16px", backgroundColor: "#1e1e1e", color: "white", transition: "transform 0.3s, box-shadow 0.3s", "&:hover": { transform: "scale(1.05)", boxShadow: "0 6px 12px rgba(0, 230, 118, 0.5)" } }}>
-              <CardMedia
-                component="img"
-                height="220"
-                image={element.imageUrl}
-                alt={element.title}
-                style={{ borderRadius: "16px 16px 0 0" }}
-                onClick={() => handleViewDetails(element._id)}
+      {/* Pledge Dialog */}
+      <Dialog open={pledgeDialogOpen} onClose={handlePledgeDialogClose} maxWidth="sm">
+        <DialogTitle>
+          Support this Campaign
+        </DialogTitle>
+        <DialogContent>
+          {currentProject && (
+            <>
+              <Typography variant="h6" sx={{ mb: 1 }}>
+                {currentProject.title}
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                <Typography variant="body2" color="text.secondary">
+                  by {currentProject.pageName}
+                </Typography>
+              </Box>
+              <DialogContentText sx={{ mb: 3 }}>
+                Enter the amount you would like to pledge. The minimum pledge amount is ₹50.
+              </DialogContentText>
+              <TextField
+                autoFocus
+                margin="dense"
+                label="Pledge Amount (₹)"
+                type="number"
+                fullWidth
+                variant="outlined"
+                value={pledgeAmount}
+                onChange={handlePledgeAmountChange}
+                InputProps={{ 
+                  inputProps: { min: 50 },
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <MonetizationOnIcon />
+                    </InputAdornment>
+                  )
+                }}
               />
-              <CardContent>
-                <Typography gutterBottom variant="h5" style={{ color: "#00e676", textAlign: "center" }} onClick={() => handleViewDetails(element._id)}>
-                  {element.title}
-                </Typography>
-                <Typography variant="body2" color="lightgrey" textAlign="center" onClick={() => handleViewDetails(element._id)}>
-                  {/* {element.description} */}
-                </Typography>
-              </CardContent>
-              <CardActions style={{ display: "flex", justifyContent: "space-between", padding: "1rem" }}>
-                <Typography variant="body1" color="orange" fontWeight="bold">
-                  Required: ₹ {element.amount}
-                </Typography>
-                <Typography variant="body1" color="lime" fontWeight="bold">
-                  Raised: ₹ {element.audience.reduce((total, a) => total + (parseInt(a.amount) || 0), 0) }
-                </Typography>
-              </CardActions>
-              <CardActions style={{ justifyContent: "center", paddingBottom: "1rem" }}>
-                <TextField
-                  inputRef={(ref) => (amountRefs.current[index] = ref)}
-                  type="number"
-                  variant="outlined"
-                  size="small"
-                  placeholder="Amount (₹)"
-                  sx={{
-                    backgroundColor: "white",
-                    borderRadius: "8px",
-                    input: { color: "black", textAlign: "center" },
-                    width: "90%",
-                  }}
-                />
-              </CardActions>
-              <CardActions>
-                <Button
-                  fullWidth
-                  sx={{
-                    backgroundColor: "#00e676",
-                    color: "black",
-                    fontWeight: "bold",
-                    "&:hover": {
-                      backgroundColor: "#00c853",
-                    },
-                  }}
-                  onClick={() => handlePledge(element.pageName, element.title, index)}
-                >
-                  Pledge
-                </Button>
-              </CardActions>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                Your support helps bring creative projects to life.
+              </Typography>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button onClick={handlePledgeDialogClose}>Cancel</Button>
+          <Button 
+            onClick={handlePledgeSubmit} 
+            variant="contained" 
+            color="primary"
+            disabled={!pledgeAmount || parseInt(pledgeAmount) < 50}
+          >
+            Confirm Pledge
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-      {/* Snackbar */}
-      <Snackbar open={openSnackbar} autoHideDuration={3000} onClose={() => setOpenSnackbar(false)}>
-        <Alert onClose={() => setOpenSnackbar(false)} severity="error" sx={{ width: '100%' }}>
+      {/* Alert Snackbar */}
+      <Snackbar 
+        open={openSnackbar} 
+        autoHideDuration={5000} 
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert 
+          onClose={handleCloseSnackbar} 
+          severity={snackbarSeverity} 
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
           {snackbarMessage}
         </Alert>
       </Snackbar>
-      <div>
-        <Snackbar open={openSnackbar1} autoHideDuration={3000} onClose={() => setOpenSnackbar1(false)}>
-          <Alert onClose={() => setOpenSnackbar1(false)} severity="error" sx={{ width: '100%' }}>
-            {snackbarMessage1}
-          </Alert>
-        </Snackbar>
-      </div>
-    </div>
+    </Container>
   );
 }
 
 export default Projects;
-
-// import React, { useState, useRef, useEffect } from "react";
-// import axios from "axios";
-// import Grid from "@mui/material/Grid";
-// import Card from "@mui/material/Card";
-// import CardActions from "@mui/material/CardActions";
-// import CardContent from "@mui/material/CardContent";
-// import CardMedia from "@mui/material/CardMedia";
-// import Typography from "@mui/material/Typography";
-// import Button from "@mui/material/Button";
-// import TextField from "@mui/material/TextField";
-// import Snackbar from "@mui/material/Snackbar";
-// import Alert from "@mui/material/Alert";
-// import { SERVER_URL } from "../../../constant/serverUrl";
-// import { useHistory } from "react-router-dom";
-
-// function Projects() {
-//   const history = useHistory();
-//   const [projects, setProjects] = useState([]);
-//   const [filteredProjects, setFilteredProjects] = useState([]);
-//   const amountRefs = useRef([]);
-//   const [amount, setAmount] = useState(0);
-//   const [searchTerm, setSearchTerm] = useState("");
-//   const [openSnackbar, setOpenSnackbar] = useState(false);
-//   const [snackbarMessage, setSnackbarMessage] = useState("");
-//   const [openSnackbar1, setOpenSnackbar1] = useState(false);
-//   const [snackbarMessage1, setSnackbarMessage1] = useState("");
-//   const [Raised, setRaised] = useState("");
-//   useEffect(() => {
-//     axios
-//       .get(SERVER_URL + "/projects")
-//       .then((response) => {
-//         setProjects([...response.data].reverse());
-//         setFilteredProjects([...response.data].reverse()); // Initially show all projects
-//       })
-//       .catch((err) => console.log(err));
-//   }, []);
-
-//   const handleSearch = (event) => {
-//     const term = event.target.value.toLowerCase();
-//     setSearchTerm(term);
-
-//     // Filter projects by title
-//     const filtered = projects.filter((project) =>
-//       project.title.toLowerCase().includes(term)
-//     );
-//     setFilteredProjects(filtered);
-//   };
-
-//   const handlePledge = (pageName, projectTitle, idx) => {
-//     const pledgeAmount = parseInt(amountRefs.current[idx].value) || 0;
-//     if (pledgeAmount === 0) return;
-
-//     // Find the specific project to update
-//     const updatedProjects = [...projects];
-//     const projectIndex = updatedProjects.findIndex((project) => project.title === projectTitle);
-    
-//     if (projectIndex !== -1) {
-//       const updatedProject = updatedProjects[projectIndex];
-      
-//       // Check if the pledge amount exceeds the required amount
-//       if (pledgeAmount < 50) {
-//         setSnackbarMessage("Amount of "+pledgeAmount+"not allowed!");
-//         setOpenSnackbar(true);
-       
-//         setSnackbarMessage1("please pledge with a minimum amount of 50");
-//         setOpenSnackbar1(true);
-      
-       
-//         return;
-//       }
-//      // console.log(updatedProject.amount+" "+updatedProject.audience.reduce((total, a) => total + (parseInt(a.amount) || 0), 0))
-//      let x=updatedProject.audience.reduce((total, a) => total + (parseInt(a.amount) || 0), 0)
-//       if (x+pledgeAmount > updatedProject.amount) {
-//         setSnackbarMessage("Amount exceeds the required pledge amount!");
-//         setOpenSnackbar(true);
-//         return;
-//       }
-
-//       // Add the pledge to the audience list
-//       updatedProject.audience.push({
-//         timestamp: Date.now(),
-//         firstName: localStorage.getItem("firstName"),
-//         lastName: localStorage.getItem("lastName"),
-//         amount: pledgeAmount,
-//       });
-
-//       // Update the raised amount for the project
-//       updatedProject.raisedAmount = updatedProject.audience.reduce(
-//         (total, a) => total + (parseInt(a.amount) || 0),
-//         0
-//       );
-
-//       // Update the projects in the state
-//       updatedProjects[projectIndex] = updatedProject;
-
-//       // Now set the new state for both projects and filteredProjects
-//       setProjects(updatedProjects);
-//       setFilteredProjects(updatedProjects);
-//     }
-
-//     // Send the pledge to the server
-//     axios
-//       .post(SERVER_URL + "/creator/project/pledge", {
-//         timestamp: Date.now(),
-//         projectTitle: projectTitle,
-//         amount: pledgeAmount,
-//         pageName: pageName,
-//         audienceEmail: localStorage.getItem("email"),
-//         firstName: localStorage.getItem("firstName"),
-//         lastName: localStorage.getItem("lastName"),
-//       })
-//       .catch((err) => console.log(err));
-//   };
-
-//   const handleViewDetails = (projectId) => {
-//     history.push(`/project-details/${projectId}`);
-//   };
-
-//   return (
-//     <div>
-//       {/* Search Box */}
-//       <div style={{ display: "flex", justifyContent: "center", marginBottom: "2rem", backgroundColor: "#f5f5f5", top: "20px" }}>
-//         <TextField
-//           variant="outlined"
-//           size="small"
-//           value={searchTerm}
-//           onChange={handleSearch}
-//           placeholder="Search by Project Title"
-//           sx={{
-//             borderRadius: "25px",
-//             width: "50%",
-//             backgroundColor: "#f5f5f5",
-//             "& .MuiOutlinedInput-root": {
-//               borderRadius: "25px",
-//               borderColor: "green",
-//             },
-//             top: "23px",
-//             borderColor: "green",
-//             input: {
-//               paddingLeft: "1rem",
-//             },
-//           }}
-//         />
-//       </div>
-
-//       {/* Project Cards */}
-//       <Grid container spacing={4} style={{ padding: "3rem", backgroundColor: "#f5f5f5" }}>
-//         {filteredProjects.map((element, index) => (
-//           <Grid item key={index} xs={12} sm={6} md={4} lg={4}>
-//             <Card sx={{ width: 330, borderRadius: "16px", backgroundColor: "#1e1e1e", color: "white", transition: "transform 0.3s, box-shadow 0.3s", "&:hover": { transform: "scale(1.05)", boxShadow: "0 6px 12px rgba(0, 230, 118, 0.5)" } }}>
-//               <CardMedia
-//                 component="img"
-//                 height="220"
-//                 image={element.imageUrl}
-//                 alt={element.title}
-//                 style={{ borderRadius: "16px 16px 0 0" }}
-//                 onClick={() => handleViewDetails(element._id)}
-//               />
-//               <CardContent>
-//                 <Typography gutterBottom variant="h5" style={{ color: "#00e676", textAlign: "center" }} onClick={() => handleViewDetails(element._id)}>
-//                   {element.title}
-//                 </Typography>
-//                 <Typography variant="body2" color="lightgrey" textAlign="center" onClick={() => handleViewDetails(element._id)}>
-//                   {element.description}
-//                 </Typography>
-//               </CardContent>
-//               <CardActions style={{ display: "flex", justifyContent: "space-between", padding: "1rem" }}>
-//                 <Typography variant="body1" color="orange" fontWeight="bold">
-//                   Required: ₹ {element.amount}
-//                 </Typography>
-//                 <Typography variant="body1" color="lime" fontWeight="bold">
-//                   Raised: ₹ {element.audience.reduce((total, a) => total + (parseInt(a.amount) || 0), 0) }
-//                           </Typography>
-//               </CardActions>
-//               <CardActions style={{ justifyContent: "center", paddingBottom: "1rem" }}>
-//                 <TextField
-//                   inputRef={(ref) => (amountRefs.current[index] = ref)}
-//                   type="number"
-//                   variant="outlined"
-//                   size="small"
-//                   placeholder="Amount (₹)"
-//                   sx={{
-//                     backgroundColor: "white",
-//                     borderRadius: "8px",
-//                     input: { color: "black", textAlign: "center" },
-//                     width: "90%",
-//                   }}
-//                 />
-//               </CardActions>
-//               <CardActions>
-//                 <Button
-//                   fullWidth
-//                   sx={{
-//                     backgroundColor: "#00e676",
-//                     color: "black",
-//                     fontWeight: "bold",
-//                     "&:hover": {
-//                       backgroundColor: "#00c853",
-//                     },
-//                   }}
-//                   onClick={() => handlePledge(element.pageName, element.title, index)}
-//                 >
-//                   Pledge
-//                 </Button>
-//               </CardActions>
-//             </Card>
-//           </Grid>
-//         ))}
-//       </Grid>
-
-//       {/* Snackbar */}
-//       <Snackbar open={openSnackbar} autoHideDuration={3000} onClose={() => setOpenSnackbar(false)}>
-//         <Alert onClose={() => setOpenSnackbar(false)} severity="error" sx={{ width: '100%' }}>
-//           {snackbarMessage}
-//         </Alert>
-//       </Snackbar>
-//       <div>
-//       <Snackbar open={openSnackbar1} autoHideDuration={3000} onClose={() => setOpenSnackbar1(false)}>
-//         <Alert onClose={() => setOpenSnackbar1(false)} severity="error" sx={{ width: '100%' }}>
-//           {snackbarMessage1}
-//         </Alert>
-//       </Snackbar>
-//       </div>
-//     </div>
-//   );
-// }
-
-// export default Projects;
-
-
-// import React, { useState, useRef, useEffect } from "react";
-// import axios from "axios";
-// import Grid from "@mui/material/Grid";
-// import Card from "@mui/material/Card";
-// import CardActions from "@mui/material/CardActions";
-// import CardContent from "@mui/material/CardContent";
-// import CardMedia from "@mui/material/CardMedia";
-// import Typography from "@mui/material/Typography";
-// import Button from "@mui/material/Button";
-// import TextField from "@mui/material/TextField";
-// import { SERVER_URL } from "../../../constant/serverUrl";
-// import { useHistory } from "react-router-dom";
-
-// function Projects() {
-//   const history = useHistory();
-//   const [projects, setProjects] = useState([]);
-//   const [filteredProjects, setFilteredProjects] = useState([]);
-//   const amountRefs = useRef([]);
-//   const [amount, setAmount] = useState(0);
-//   const [searchTerm, setSearchTerm] = useState("");
-
-//   useEffect(() => {
-//     axios
-//       .get(SERVER_URL + "/projects")
-//       .then((response) => {
-//         setProjects([...response.data].reverse());
-//         setFilteredProjects([...response.data].reverse()); // Initially show all projects
-//       })
-//       .catch((err) => console.log(err));
-     
-//   }, []);
-
-//   const handleSearch = (event) => {
-//     const term = event.target.value.toLowerCase();
-//     setSearchTerm(term);
-
-//     // Filter projects by title
-//     const filtered = projects.filter((project) =>
-//       project.title.toLowerCase().includes(term)
-//     );
-//     setFilteredProjects(filtered);
-//   };
-//   const handlePledge = (pageName, projectTitle, idx) => {
-//     const pledgeAmount = parseInt(amountRefs.current[idx].value) || 0;
-//     if (pledgeAmount === 0) return;
-  
-//     // Find the specific project to update
-//     const updatedProjects = [...projects];
-//     const projectIndex = updatedProjects.findIndex((project) => project.title === projectTitle);
-    
-//     if (projectIndex !== -1) {
-//       const updatedProject = updatedProjects[projectIndex];
-//       updatedProject.audience.push({
-//         timestamp: Date.now(),
-//         firstName: localStorage.getItem("firstName"),
-//         lastName: localStorage.getItem("lastName"),
-//         amount: pledgeAmount,
-//       });
-  
-//       // Update the raised amount for the project
-//       updatedProject.raisedAmount = updatedProject.audience.reduce(
-//         (total, a) => total + (parseInt(a.amount) || 0),
-//         0
-//       );
-  
-//       // Update the projects in the state
-//       updatedProjects[projectIndex] = updatedProject;
-  
-//       // Now set the new state for both projects and filteredProjects
-//       setProjects(updatedProjects);
-//       setFilteredProjects(updatedProjects);
-//     }
-  
-//     // Send the pledge to the server
-//     axios
-//       .post(SERVER_URL + "/creator/project/pledge", {
-//         timestamp: Date.now(),
-//         projectTitle: projectTitle,
-//         amount: pledgeAmount,
-//         pageName: pageName,
-//         audienceEmail: localStorage.getItem("email"),
-//         firstName: localStorage.getItem("firstName"),
-//         lastName: localStorage.getItem("lastName"),
-//       })
-//       .catch((err) => console.log(err));
-//   };
-//   const handlePledge1 = (pageName, projectTitle, idx) => {
-//     const pledgeAmount = parseInt(amountRefs.current[idx].value) || 0;
-//     if(pledgeAmount==0)
-//       return;
-//     setAmount(pledgeAmount);
-//    // handlePayment(pledgeAmount);
-
-//     axios
-//       .post(SERVER_URL + "/creator/project/pledge", {
-//         timestamp: Date.now(),
-//         projectTitle: projectTitle,
-//         amount: pledgeAmount,
-//         pageName: pageName,
-//         audienceEmail: localStorage.getItem("email"),
-//         firstName: localStorage.getItem("firstName"),
-//         lastName: localStorage.getItem("lastName"),
-//       })
-//       .then(() => axios.get(SERVER_URL + "/projects").then((response) => setProjects(response.data)))
-//       .catch((err) => console.log(err));
-//   };
-
-//   const handlePayment = (amount) => {
-//     const options = {
-//       key: "rzp_test_XphPOSB4djGspx",
-//       amount: amount * 100,
-//       currency: "INR",
-//       name: "Fundify",
-//       description: "Payment for Pledge",
-//       handler: function (response) {
-//         alert("Payment Successful!");
-//       },
-//       prefill: {
-//         name: localStorage.getItem("firstName") + " " + localStorage.getItem("lastName"),
-//         email: localStorage.getItem("email"),
-//       },
-//       theme: { color: "#00e676" },
-//     };
-//     const rzp = new window.Razorpay(options);
-//     rzp.open();
-//   };
-
-//   const handleViewDetails = (projectId) => {
-//     history.push(`/project-details/${projectId}`);
-//   };
-
-//   return (
-//     <div>
-//       {/* Search Box */}
-//       <div style={{ display: "flex", justifyContent: "center", marginBottom: "2rem",backgroundColor: "#f5f5f5",top:"20px" }}>
-//         <TextField
-//           variant="outlined"
-//           size="small"
-//           value={searchTerm}
-//           onChange={handleSearch}
-//           placeholder="Search by Project Title"
-//           sx={{
-//             borderRadius: "25px",
-//             width: "50%",
-//            backgroundColor: "#f5f5f5",
-//             "& .MuiOutlinedInput-root": {
-//               borderRadius: "25px",
-//               borderColor:"green",
-              
-//             },
-//             top:"23px",
-//             borderColor:"green",
-//             input: {
-//               paddingLeft: "1rem",
-//             },
-//           }}
-//         />
-//       </div>
-
-//       {/* Project Cards */}
-//       <Grid container spacing={4} style={{ padding: "3rem", backgroundColor: "#f5f5f5" }}>
-//         {filteredProjects.map((element, index) => (
-//           <Grid item key={index} xs={12} sm={6} md={4} lg={4}>
-//             <Card
-//               sx={{
-//                 width: 330,
-//                 borderRadius: "16px",
-//                 backgroundColor: "#1e1e1e",
-//                 color: "white",
-//                 transition: "transform 0.3s, box-shadow 0.3s",
-//                 "&:hover": {
-//                   transform: "scale(1.05)",
-//                   boxShadow: "0 6px 12px rgba(0, 230, 118, 0.5)",
-//                 },
-//               }}
-//             >
-//               <CardMedia
-//                 component="img"
-//                 height="220"
-//                 image={element.imageUrl}
-//                 alt={element.title}
-//                 style={{ borderRadius: "16px 16px 0 0" }}
-//                 onClick={() => handleViewDetails(element._id)}
-//               />
-//               <CardContent>
-//                 <Typography
-//                   gutterBottom
-//                   variant="h5"
-//                   style={{ color: "#00e676", textAlign: "center" }}
-//                   onClick={() => handleViewDetails(element._id)}
-//                 >
-//                   {element.title}
-//                 </Typography>
-//                 <Typography
-//                   variant="body2"
-//                   color="lightgrey"
-//                   textAlign="center"
-//                   onClick={() => handleViewDetails(element._id)}
-//                 >
-//                   {element.description}
-//                 </Typography>
-//               </CardContent>
-//               <CardActions style={{ display: "flex", justifyContent: "space-between", padding: "1rem" }}>
-//                 <Typography variant="body1" color="orange" fontWeight="bold">
-//                   Required: ₹ {element.amount}
-//                 </Typography>
-//                 <Typography variant="body1" color="lime" fontWeight="bold">
-//                   Raised: ₹ {element.audience.reduce((total, a) => total + (parseInt(a.amount) || 0), 0)}
-//                 </Typography>
-//               </CardActions>
-//               <CardActions style={{ justifyContent: "center", paddingBottom: "1rem" }}>
-//                 <TextField
-//                   inputRef={(ref) => (amountRefs.current[index] = ref)}
-//                   type="number"
-//                   variant="outlined"
-//                   size="small"
-//                   placeholder="Amount (₹)"
-//                   sx={{
-//                     backgroundColor: "white",
-//                     borderRadius: "8px",
-//                     input: { color: "black", textAlign: "center" },
-//                     width: "90%",
-//                   }}
-//                 />
-//               </CardActions>
-//               <CardActions>
-//                 <Button
-//                   fullWidth
-//                   sx={{
-//                     backgroundColor: "#00e676",
-//                     color: "black",
-//                     fontWeight: "bold",
-//                     "&:hover": {
-//                       backgroundColor: "#00c853",
-//                     },
-//                   }}
-//                   onClick={() => handlePledge(element.pageName, element.title, index)}
-//                 >
-//                   Pledge
-//                 </Button>
-//               </CardActions>
-//             </Card>
-//           </Grid>
-//         ))}
-//       </Grid>
-//     </div>
-//   );
-// }
-
-// export default Projects;
-
-
-
-//----------
-
-// import React, { useState, useRef, useEffect } from "react";
-// import axios from "axios";
-// import Grid from "@mui/material/Grid";
-// import Card from "@mui/material/Card";
-// import CardActions from "@mui/material/CardActions";
-// import CardContent from "@mui/material/CardContent";
-// import CardMedia from "@mui/material/CardMedia";
-// import Typography from "@mui/material/Typography";
-// import Button from "@mui/material/Button";
-// import TextField from "@mui/material/TextField";
-// import { SERVER_URL } from "../../../constant/serverUrl";
-// import { useHistory } from "react-router-dom";
-
-// function Projects() {
-//   const history = useHistory();
-//   const [projects, setProjects] = useState([]);
-//   const [filteredProjects, setFilteredProjects] = useState([]);
-//   const amountRefs = useRef([]);
-//   const [amount, setAmount] = useState(0);
-//   const [searchTerm, setSearchTerm] = useState("");
-
-//   // Fetch all projects
-//   useEffect(() => {
-//     axios
-//       .get(SERVER_URL + "/projects")
-//       .then((response) => {
-//         setProjects(response.data);
-//         setFilteredProjects(response.data); // Initially show all projects
-//       })
-//       .catch((err) => console.log(err));
-//   }, []);
-
-//   // Filter projects based on search term
-//   const handleSearch = (event) => {
-//     const term = event.target.value.toLowerCase();
-//     setSearchTerm(term);
-
-//     // Filter projects by title
-//     const filtered = projects.filter((project) =>
-//       project.title.toLowerCase().includes(term)
-//     );
-//     setFilteredProjects(filtered);
-//   };
-// const handlePledge = (pageName, projectTitle, idx) => {
-//   const pledgeAmount = parseInt(amountRefs.current[idx].value) || 0;
-//   setAmount(pledgeAmount);
-//   handlePayment(pledgeAmount);
-
-//   axios
-//     .post(SERVER_URL + "/creator/project/pledge", {
-//       timestamp: Date.now(),
-//       projectTitle: projectTitle,
-//       amount: pledgeAmount,
-//       pageName: pageName,
-//       audienceEmail: localStorage.getItem("email"),
-//       firstName: localStorage.getItem("firstName"),
-//       lastName: localStorage.getItem("lastName"),
-//     })
-//     .then(() => axios.get(SERVER_URL + "/projects").then((response) => setProjects(response.data)))
-//     .catch((err) => console.log(err));
-// };
-
-// const handlePayment = (amount) => {
-//   const options = {
-//     key: "rzp_test_XphPOSB4djGspx",
-//     amount: amount * 100,
-//     currency: "INR",
-//     name: "Fundify",
-//     description: "Payment for Pledge",
-//     handler: function (response) {
-//       alert("Payment Successful!");
-//     },
-//     prefill: {
-//       name: localStorage.getItem("firstName") + " " + localStorage.getItem("lastName"),
-//       email: localStorage.getItem("email"),
-//     },
-//     theme: { color: "#00e676" },
-//   };
-//   const rzp = new window.Razorpay(options);
-//   rzp.open();
-// };
-
-//   // Navigate to the detailed page of the selected project
-//   const handleViewDetails = (projectId) => {
-//     history.push(`/project-details/${projectId}`);
-//   };
-
-//   return (
-//     <div>
-//       {/* Filter Box */}
-//       <div style={{ textAlign: "center", marginBottom: "2rem" }}>
-//         <TextField
-//           variant="outlined"
-//           size="medium"
-//           placeholder="Search by Title"
-//           value={searchTerm}
-//           onChange={handleSearch}
-//           sx={{
-//             backgroundColor: "white",
-//             borderRadius: "80rem", // More rounded corners
-//             width: "40%", // Reduced width for a narrower look
-//             height: "70%",
-//             input: { color: "black", textAlign: "center" },
-//             marginTop: "2rem",
-//             fontWeight: "bold",
-//           }}
-//         />
-//       </div>
-
-//       <Grid container spacing={4} style={{ padding: "3rem", backgroundColor: "#f5f5f5" }}>
-//         {filteredProjects.map((element, index) => (
-//           <Grid item key={index} xs={12} sm={6} md={4} lg={4}>
-//             <Card
-//               sx={{
-//                 width: 330,
-//                 borderRadius: "16px",
-//                 backgroundColor: "#1e1e1e",
-//                 color: "white",
-//                 transition: "transform 0.3s, box-shadow 0.3s",
-//                 "&:hover": {
-//                   transform: "scale(1.05)",
-//                   boxShadow: "0 6px 12px rgba(0, 230, 118, 0.5)",
-//                 },
-//               }}
-//              // Clicking on image/title redirects to detailed view
-//             >
-//               <CardMedia
-//                 component="img"
-//                 height="220"
-//                 image={element.imageUrl}
-//                 alt={element.title}
-//                 style={{ borderRadius: "16px 16px 0 0" }}
-//                 onClick={() => handleViewDetails(element._id)} 
-//               />
-//               <CardContent>
-//                 <Typography gutterBottom variant="h5" style={{ color: "#00e676", textAlign: "center" }}  onClick={() => handleViewDetails(element._id)}>
-                 
-                
-//                   {element.title} 
-//                 </Typography>
-//                 <Typography variant="body2" color="lightgrey" textAlign="center"   onClick={() => handleViewDetails(element._id)} >
-                  
-                 
-//                   {element.description}
-//                 </Typography>
-//               </CardContent>
-//               <CardActions style={{ display: "flex", justifyContent: "space-between", padding: "1rem" }}>
-//                 <Typography variant="body1" color="orange" fontWeight="bold">
-//                   Required: ₹ {element.amount}
-//                 </Typography>
-//                 <Typography variant="body1" color="lime" fontWeight="bold">
-//                   Raised: ₹ {element.audience.reduce((total, a) => total + (parseInt(a.amount) || 0), 0)}
-//                 </Typography>
-//               </CardActions>
-//               <CardActions style={{ justifyContent: "center", paddingBottom: "1rem" }}>
-//                 <TextField
-//                   inputRef={(ref) => (amountRefs.current[index] = ref)}
-//                   type="number"
-//                   variant="outlined"
-//                   size="small"
-//                   placeholder="Amount (₹)"
-//                   sx={{
-//                     backgroundColor: "white",
-//                     borderRadius: "8px",
-//                     input: { color: "black", textAlign: "center" },
-//                     width: "90%",
-//                   }}
-//                 />
-//               </CardActions>
-//               <CardActions>
-//                 <Button
-//                   fullWidth
-//                   sx={{
-//                     backgroundColor: "#00e676",
-//                     color: "black",
-//                     fontWeight: "bold",
-//                     "&:hover": {
-//                       backgroundColor: "#00c853",
-//                     },
-//                   }}
-//                   onClick={(e) => {
-//                      // Prevent click from triggering project detail navigation
-//                     handlePledge(element.pageName, element.title, index); // Handle pledge for selected project
-//                   }}
-//                 >
-//                   Pledge
-//                 </Button>
-//               </CardActions>
-//             </Card>
-//           </Grid>
-//         ))}
-//       </Grid>
-//     </div>
-//   );
-// }
-
-// export default Projects;

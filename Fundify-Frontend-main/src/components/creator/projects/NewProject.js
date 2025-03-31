@@ -53,7 +53,7 @@ export default function NewProject({ handleViewProjects }) {
 
     // If an image URL is provided, create project without file upload
     axios
-      .post(SERVER_URL + "/projects/new", projectData)
+      .post(SERVER_URL + "/api/campaigns", projectData)
       .then((response) => {
         handleViewProjects(projectName, email);
       });
